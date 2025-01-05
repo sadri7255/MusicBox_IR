@@ -61,10 +61,13 @@ def send_welcome(message):
     user_id = message.chat.id
     username = message.chat.username or "Unknown"
     
+    # ریست وضعیت کاربر
+    user_states[user_id] = {"state": STATE_WAITING_AUDIO}
+    
     # ذخیره اطلاعات کاربر در Google Sheets
     save_user_info_to_sheet(user_id, username)
     
-    user_states[user_id] = {"state": STATE_WAITING_AUDIO}
+    # ارسال پیام خوش‌آمدگویی
     bot.send_message(user_id, "👋 سلام! لطفاً فایل صوتی خود را ارسال کنید.")
 
 # دستور reset
@@ -140,6 +143,9 @@ def handle_callback(call):
     state = user_states.get(chat_id, {})
 
     if call.data == "change_title":
+        if 'audio_data' not in state:
+            bot.answer_callback_query(call.id, "❌ ابتدا فایل صوتی را ارسال کنید!")
+            return
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=state['processing_message_id'],
@@ -147,6 +153,9 @@ def handle_callback(call):
         )
         user_states[chat_id]['next_action'] = "set_title"
     elif call.data == "change_artist":
+        if 'audio_data' not in state:
+            bot.answer_callback_query(call.id, "❌ ابتدا فایل صوتی را ارسال کنید!")
+            return
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=state['processing_message_id'],
@@ -154,8 +163,14 @@ def handle_callback(call):
         )
         user_states[chat_id]['next_action'] = "set_artist"
     elif call.data == "reduce_size":
+        if 'audio_data' not in state:
+            bot.answer_callback_query(call.id, "❌ ابتدا فایل صوتی را ارسال کنید!")
+            return
         reduce_audio_size(chat_id)
     elif call.data == "save_and_send":
+        if 'audio_data' not in state:
+            bot.answer_callback_query(call.id, "❌ ابتدا فایل صوتی را ارسال کنید!")
+            return
         save_and_send_audio(chat_id)
 
 # دریافت عنوان جدید
