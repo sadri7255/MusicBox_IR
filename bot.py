@@ -3,18 +3,22 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from pydub import AudioSegment
 import os
 import io
+import logging
 
+# تنظیمات اولیه
 TOKEN = "7197743010:AAF8kYM5tcFsfShRpyUmevS0BkrV2osPQ5I"  # توکن ربات شما
 bot = telebot.TeleBot(TOKEN)
 
 TEMP_FOLDER = "temp_audio"
 os.makedirs(TEMP_FOLDER, exist_ok=True)
 
-MAX_FILE_SIZE_MB = 25
 user_states = {}
 
 STATE_WAITING_AUDIO = "waiting_audio"
 STATE_WAITING_OPTIONS = "waiting_options"
+
+# تنظیمات لاگ‌گیری
+logging.basicConfig(filename='bot.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # دستور شروع
 @bot.message_handler(commands=['start', 'help'])
@@ -25,20 +29,14 @@ def send_welcome(message):
 # دریافت فایل صوتی
 @bot.message_handler(content_types=['audio', 'voice'])
 def process_audio(message):
-    state = user_states.get(message.chat.id, {})
-    if state.get('state') != STATE_WAITING_AUDIO:
-        bot.send_message(message.chat.id, "❌ لطفاً ابتدا فایل صوتی را ارسال کنید!")
-        return
-
     try:
+        state = user_states.get(message.chat.id, {})
+        if state.get('state') != STATE_WAITING_AUDIO:
+            bot.send_message(message.chat.id, "❌ لطفاً ابتدا فایل صوتی را ارسال کنید!")
+            return
+
         file_id = message.audio.file_id if message.audio else message.voice.file_id
         file_info = bot.get_file(file_id)
-
-        # بررسی حجم فایل
-        file_size_mb = file_info.file_size / (1024 * 1024)
-        if file_size_mb > MAX_FILE_SIZE_MB:
-            bot.send_message(message.chat.id, f"⚠️ فایل ارسالی بزرگ‌تر از {MAX_FILE_SIZE_MB} مگابایت است.")
-            return
 
         # ارسال پیام اولیه و ذخیره message_id برای به‌روزرسانی
         processing_message = bot.send_message(message.chat.id, "🔄 در حال پردازش فایل صوتی...")
@@ -56,16 +54,18 @@ def process_audio(message):
         show_options(message.chat.id)
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ خطا: {str(e)}")
+        logging.error(f"Error processing audio: {str(e)}")
+        bot.send_message(message.chat.id, f"❌ خطا در پردازش فایل صوتی: {str(e)}")
 
 # نمایش دکمه‌های شیشه‌ای
 def show_options(chat_id):
     keyboard = InlineKeyboardMarkup(row_width=2)
     keyboard.add(
-        InlineKeyboardButton("تغییر نام آلبوم", callback_data="change_title"),
-        InlineKeyboardButton("تغییر نام هنرمند", callback_data="change_artist"),
-        InlineKeyboardButton("کم کردن حجم فایل", callback_data="reduce_size"),
-        InlineKeyboardButton("ثبت تغییرات و ارسال فایل", callback_data="save_and_send")
+        InlineKeyboardButton("📝 تغییر نام آلبوم", callback_data="change_title"),
+        InlineKeyboardButton("🎤 تغییر نام هنرمند", callback_data="change_artist"),
+        InlineKeyboardButton("📉 کم کردن حجم فایل", callback_data="reduce_size"),
+        InlineKeyboardButton("✅ ثبت تغییرات و ارسال فایل", callback_data="save_and_send"),
+        InlineKeyboardButton("❌ لغو", callback_data="cancel")
     )
     bot.edit_message_text(
         chat_id=chat_id,
@@ -98,6 +98,9 @@ def handle_callback(call):
         reduce_audio_size(chat_id)
     elif call.data == "save_and_send":
         save_and_send_audio(chat_id)
+    elif call.data == "cancel":
+        handle_cancel(call)
+
 # دریافت عنوان جدید
 @bot.message_handler(func=lambda msg: user_states.get(msg.chat.id, {}).get('next_action') == "set_title")
 def set_title(message):
@@ -128,7 +131,7 @@ def reduce_audio_size(chat_id):
     try:
         audio_data = state.get('audio_data')
         audio = AudioSegment.from_file(audio_data)
-        reduced_audio = audio.set_frame_rate(16000).set_channels(1)  # کاهش کیفیت
+        reduced_audio = audio.set_frame_rate(22050).set_channels(1)  # کاهش کیفیت با حفظ کیفیت نسبی
         user_states[chat_id]['audio_data'] = reduced_audio
         bot.edit_message_text(
             chat_id=chat_id,
@@ -137,6 +140,7 @@ def reduce_audio_size(chat_id):
         )
         show_options(chat_id)
     except Exception as e:
+        logging.error(f"Error reducing audio size: {str(e)}")
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=state['processing_message_id'],
@@ -163,11 +167,12 @@ def save_and_send_audio(chat_id):
             text="✅ فایل با موفقیت ارسال شد."
         )
 
-        # بازگشت به حالت اولیه و نمایش دکمه‌های شیشه‌ای جدید
+        # پاک کردن داده‌های موقت
         user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
         show_new_file_options(chat_id)
 
     except Exception as e:
+        logging.error(f"Error sending audio: {str(e)}")
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=state['processing_message_id'],
@@ -196,6 +201,17 @@ def handle_new_file(call):
         chat_id=chat_id,
         message_id=user_states[chat_id]['processing_message_id'],
         text="👋 لطفاً فایل صوتی جدید خود را ارسال کنید."
+    )
+
+# پردازش لغو عملیات
+@bot.callback_query_handler(func=lambda call: call.data == "cancel")
+def handle_cancel(call):
+    chat_id = call.message.chat.id
+    user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
+    bot.edit_message_text(
+        chat_id=chat_id,
+        message_id=user_states[chat_id]['processing_message_id'],
+        text="❌ عملیات لغو شد. لطفاً فایل صوتی جدیدی ارسال کنید."
     )
 
 # اجرای ربات
