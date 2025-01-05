@@ -16,18 +16,33 @@ user_states = {}
 STATE_WAITING_AUDIO = "waiting_audio"
 STATE_WAITING_OPTIONS = "waiting_options"
 
+# فایل برای ذخیره اطلاعات کاربران
+USER_FILE = "userid.txt"
+
+# تابع برای ذخیره اطلاعات کاربر
+def save_user_info(user_id, username):
+    with open(USER_FILE, "a") as file:
+        file.write(f"User ID: {user_id}, Username: {username}\n")
+
 # دستور شروع
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    user_states[message.chat.id] = {"state": STATE_WAITING_AUDIO}
-    bot.send_message(message.chat.id, "👋 سلام! لطفاً فایل صوتی خود را ارسال کنید.")
+    user_id = message.chat.id
+    username = message.chat.username or "Unknown"
+    
+    # ذخیره اطلاعات کاربر
+    save_user_info(user_id, username)
+    
+    user_states[user_id] = {"state": STATE_WAITING_AUDIO}
+    bot.send_message(user_id, "👋 سلام! لطفاً فایل صوتی خود را ارسال کنید.")
 
 # دریافت فایل صوتی
 @bot.message_handler(content_types=['audio', 'voice'])
 def process_audio(message):
-    state = user_states.get(message.chat.id, {})
+    user_id = message.chat.id
+    state = user_states.get(user_id, {})
     if state.get('state') != STATE_WAITING_AUDIO:
-        bot.send_message(message.chat.id, "❌ لطفاً ابتدا فایل صوتی را ارسال کنید!")
+        bot.send_message(user_id, "❌ لطفاً ابتدا فایل صوتی را ارسال کنید!")
         return
 
     try:
@@ -37,26 +52,26 @@ def process_audio(message):
         # بررسی حجم فایل
         file_size_mb = file_info.file_size / (1024 * 1024)
         if file_size_mb > MAX_FILE_SIZE_MB:
-            bot.send_message(message.chat.id, f"⚠️ فایل ارسالی بزرگ‌تر از {MAX_FILE_SIZE_MB} مگابایت است.")
+            bot.send_message(user_id, f"⚠️ فایل ارسالی بزرگ‌تر از {MAX_FILE_SIZE_MB} مگابایت است.")
             return
 
         # ارسال پیام اولیه و ذخیره message_id برای به‌روزرسانی
-        processing_message = bot.send_message(message.chat.id, "🔄 در حال پردازش فایل صوتی...")
-        user_states[message.chat.id]['processing_message_id'] = processing_message.message_id
+        processing_message = bot.send_message(user_id, "🔄 در حال پردازش فایل صوتی...")
+        user_states[user_id]['processing_message_id'] = processing_message.message_id
 
         # دانلود فایل
         downloaded_file = bot.download_file(file_info.file_path)
         audio_data = io.BytesIO(downloaded_file)
 
         # ذخیره داده در حافظه
-        user_states[message.chat.id]['audio_data'] = audio_data
-        user_states[message.chat.id]['state'] = STATE_WAITING_OPTIONS
+        user_states[user_id]['audio_data'] = audio_data
+        user_states[user_id]['state'] = STATE_WAITING_OPTIONS
 
         # نمایش دکمه‌های شیشه‌ای
-        show_options(message.chat.id)
+        show_options(user_id)
 
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ خطا: {str(e)}")
+        bot.send_message(user_id, f"❌ خطا: {str(e)}")
 
 # نمایش دکمه‌های شیشه‌ای
 def show_options(chat_id):
@@ -102,26 +117,28 @@ def handle_callback(call):
 # دریافت عنوان جدید
 @bot.message_handler(func=lambda msg: user_states.get(msg.chat.id, {}).get('next_action') == "set_title")
 def set_title(message):
-    user_states[message.chat.id]['title'] = message.text
-    user_states[message.chat.id]['next_action'] = None
+    user_id = message.chat.id
+    user_states[user_id]['title'] = message.text
+    user_states[user_id]['next_action'] = None
     bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=user_states[message.chat.id]['processing_message_id'],
+        chat_id=user_id,
+        message_id=user_states[user_id]['processing_message_id'],
         text=f"✅ عنوان آلبوم به **{message.text}** تغییر یافت."
     )
-    show_options(message.chat.id)
+    show_options(user_id)
 
 # دریافت نام هنرمند جدید
 @bot.message_handler(func=lambda msg: user_states.get(msg.chat.id, {}).get('next_action') == "set_artist")
 def set_artist(message):
-    user_states[message.chat.id]['artist'] = message.text
-    user_states[message.chat.id]['next_action'] = None
+    user_id = message.chat.id
+    user_states[user_id]['artist'] = message.text
+    user_states[user_id]['next_action'] = None
     bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=user_states[message.chat.id]['processing_message_id'],
+        chat_id=user_id,
+        message_id=user_states[user_id]['processing_message_id'],
         text=f"✅ نام هنرمند به **{message.text}** تغییر یافت."
     )
-    show_options(message.chat.id)
+    show_options(user_id)
 
 # کم کردن حجم فایل
 def reduce_audio_size(chat_id):
