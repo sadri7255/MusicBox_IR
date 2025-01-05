@@ -56,23 +56,12 @@ def connect_to_google_sheets():
 
 # تابع برای ذخیره اطلاعات کاربر در Google Sheets
 def save_user_info_to_sheet(user_id, username):
-    sheet = connect_to_google_sheets()
-    sheet.append_row([user_id, username])  # اضافه کردن اطلاعات به انتهای شیت
-
-# دستور شروع
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    user_id = message.chat.id
-    username = message.chat.username or "Unknown"
-    
-    # ریست وضعیت کاربر
-    user_states[user_id] = {"state": STATE_WAITING_AUDIO}
-    
-    # ذخیره اطلاعات کاربر در Google Sheets
-    save_user_info_to_sheet(user_id, username)
-    
-    # ارسال پیام خوش‌آمدگویی
-    bot.send_message(user_id, "👋 سلام! لطفاً فایل صوتی خود را ارسال کنید.")
+    try:
+        sheet = connect_to_google_sheets()
+        sheet.append_row([user_id, username])  # اضافه کردن اطلاعات به انتهای شیت
+        print("اطلاعات با موفقیت ذخیره شد.")
+    except Exception as e:
+        print(f"خطا در ذخیره اطلاعات: {str(e)}")
 
 # دستور reset
 @bot.message_handler(commands=['reset'])
@@ -84,7 +73,7 @@ def reset_bot(message):
         del user_states[user_id]
     
     # ارسال پیام به کاربر
-    bot.send_message(user_id, "🔄 ربات ریست شد. لطفاً فایل صوتی جدید خود را ارسال کنید.")
+    bot.send_message(user_id, "🔄 ربات ریست شد. لطفاً فایل صوتی خود را ارسال کنید.")
     user_states[user_id] = {"state": STATE_WAITING_AUDIO}
 
 # دریافت فایل صوتی
@@ -131,7 +120,8 @@ def show_options(chat_id):
         InlineKeyboardButton("تغییر نام آلبوم", callback_data="change_title"),
         InlineKeyboardButton("تغییر نام هنرمند", callback_data="change_artist"),
         InlineKeyboardButton("کم کردن حجم فایل", callback_data="reduce_size"),
-        InlineKeyboardButton("ثبت تغییرات و ارسال فایل", callback_data="save_and_send")
+        InlineKeyboardButton("ثبت تغییرات و ارسال فایل", callback_data="save_and_send"),
+        InlineKeyboardButton("ریست ربات", callback_data="reset_bot")  # دکمه ریست ربات
     )
     bot.edit_message_text(
         chat_id=chat_id,
@@ -176,6 +166,8 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ ابتدا فایل صوتی را ارسال کنید!")
             return
         save_and_send_audio(chat_id)
+    elif call.data == "reset_bot":  # پردازش دکمه ریست ربات
+        reset_bot(call.message)
 
 # دریافت عنوان جدید
 @bot.message_handler(func=lambda msg: user_states.get(msg.chat.id, {}).get('next_action') == "set_title")
