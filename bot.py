@@ -26,11 +26,15 @@ STATE_WAITING_OPTIONS = "waiting_options"
 
 # تابع برای ایجاد credentials از Environment Variables
 def create_credentials_from_env():
+    google_private_key = os.getenv("GOOGLE_PRIVATE_KEY")
+    if google_private_key is None:
+        raise ValueError("GOOGLE_PRIVATE_KEY not found in environment variables.")
+    
     credentials = {
         "type": os.getenv("GOOGLE_TYPE"),
         "project_id": os.getenv("GOOGLE_PROJECT_ID"),
         "private_key_id": os.getenv("GOOGLE_PRIVATE_KEY_ID"),
-        "private_key": os.getenv("GOOGLE_PRIVATE_KEY").replace("\\n", "\n"),
+        "private_key": google_private_key.replace("\\n", "\n"),
         "client_email": os.getenv("GOOGLE_CLIENT_EMAIL"),
         "client_id": os.getenv("GOOGLE_CLIENT_ID"),
         "auth_uri": os.getenv("GOOGLE_AUTH_URI"),
@@ -275,5 +279,8 @@ def handle_new_file(call):
         text="👋 لطفاً فایل صوتی جدید خود را ارسال کنید."
     )
 
-# اجرای ربات
-bot.infinity_polling()
+# اجرای ربات با مدیریت خطاها
+try:
+    bot.infinity_polling(skip_pending=True)
+except Exception as e:
+    print(f"An error occurred: {e}")
