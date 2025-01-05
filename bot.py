@@ -5,7 +5,6 @@ import os
 import io
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-import json
 
 # توکن ربات شما
 TOKEN = "7197743010:AAF8kYM5tcFsfShRpyUmevS0BkrV2osPQ5I"
@@ -67,6 +66,19 @@ def send_welcome(message):
     
     user_states[user_id] = {"state": STATE_WAITING_AUDIO}
     bot.send_message(user_id, "👋 سلام! لطفاً فایل صوتی خود را ارسال کنید.")
+
+# دستور reset
+@bot.message_handler(commands=['reset'])
+def reset_bot(message):
+    user_id = message.chat.id
+    
+    # پاک کردن وضعیت کاربر
+    if user_id in user_states:
+        del user_states[user_id]
+    
+    # ارسال پیام به کاربر
+    bot.send_message(user_id, "🔄 ربات ریست شد. لطفاً فایل صوتی جدید خود را ارسال کنید.")
+    user_states[user_id] = {"state": STATE_WAITING_AUDIO}
 
 # دریافت فایل صوتی
 @bot.message_handler(content_types=['audio', 'voice'])
