@@ -63,18 +63,19 @@ def save_user_info_to_sheet(user_id, username):
     except Exception as e:
         print(f"خطا در ذخیره اطلاعات: {str(e)}")
 
+# دستور start
+@bot.message_handler(commands=['start'])
+def start_bot(message):
+    user_id = message.chat.id
+    user_states[user_id] = {"state": STATE_WAITING_AUDIO}
+    bot.send_message(user_id, "👋 لطفاً فایل صوتی خود را ارسال کنید.")
+
 # دستور reset
 @bot.message_handler(commands=['reset'])
 def reset_bot(message):
     user_id = message.chat.id
-    
-    # پاک کردن وضعیت کاربر
-    if user_id in user_states:
-        del user_states[user_id]
-    
-    # ارسال پیام به کاربر
-    bot.send_message(user_id, "🔄 ربات ریست شد. لطفاً فایل صوتی خود را ارسال کنید.")
     user_states[user_id] = {"state": STATE_WAITING_AUDIO}
+    bot.send_message(user_id, "🔄 ربات ریست شد. لطفاً فایل صوتی خود را ارسال کنید.")
 
 # دریافت فایل صوتی
 @bot.message_handler(content_types=['audio', 'voice'])
@@ -92,7 +93,7 @@ def process_audio(message):
         # بررسی حجم فایل
         file_size_mb = file_info.file_size / (1024 * 1024)
         if file_size_mb > MAX_FILE_SIZE_MB:
-            bot.send_message(user_id, f"⚠️ فایل ارسالی بزرگ‌تر از {MAX_FILE_SIZE_MB} مگابایت است.")
+            bot.send_message(user_id, f"⚠️ فایل ارسالی بزرگ‌تر از {MAX_FILE_SIZE_MB} مگابایت است. لطفاً فایلی با حجم کمتر ارسال کنید.")
             return
 
         # ارسال پیام اولیه و ذخیره message_id برای به‌روزرسانی
@@ -111,7 +112,7 @@ def process_audio(message):
         show_options(user_id)
 
     except Exception as e:
-        bot.send_message(user_id, f"❌ خطا: {str(e)}")
+        bot.send_message(user_id, f"❌ خطا در پردازش فایل صوتی: {str(e)}")
 
 # نمایش دکمه‌های شیشه‌ای
 def show_options(chat_id):
@@ -121,7 +122,7 @@ def show_options(chat_id):
         InlineKeyboardButton("تغییر نام هنرمند", callback_data="change_artist"),
         InlineKeyboardButton("کم کردن حجم فایل", callback_data="reduce_size"),
         InlineKeyboardButton("ثبت تغییرات و ارسال فایل", callback_data="save_and_send"),
-        InlineKeyboardButton("ریست ربات", callback_data="reset_bot")  # دکمه ریست ربات
+        InlineKeyboardButton("ریست ربات", callback_data="reset_bot")
     )
     bot.edit_message_text(
         chat_id=chat_id,
@@ -166,7 +167,7 @@ def handle_callback(call):
             bot.answer_callback_query(call.id, "❌ ابتدا فایل صوتی را ارسال کنید!")
             return
         save_and_send_audio(chat_id)
-    elif call.data == "reset_bot":  # پردازش دکمه ریست ربات
+    elif call.data == "reset_bot":
         reset_bot(call.message)
 
 # دریافت عنوان جدید
