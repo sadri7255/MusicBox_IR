@@ -161,11 +161,16 @@ def save_and_send_audio(chat_id):
 
         # ارسال فایل به کاربر
         bot.send_audio(chat_id, processed_file, title=title, performer=artist)
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=state['processing_message_id'],
-            text="✅ فایل با موفقیت ارسال شد."
-        )
+
+        # به‌روزرسانی پیام پردازش
+        if 'processing_message_id' in state:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=state['processing_message_id'],
+                text="✅ فایل با موفقیت ارسال شد."
+            )
+        else:
+            bot.send_message(chat_id, "✅ فایل با موفقیت ارسال شد.")
 
         # پاک کردن داده‌های موقت
         user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
@@ -173,11 +178,14 @@ def save_and_send_audio(chat_id):
 
     except Exception as e:
         logging.error(f"Error sending audio: {str(e)}")
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=state['processing_message_id'],
-            text=f"❌ خطا در ارسال فایل: {str(e)}"
-        )
+        if 'processing_message_id' in state:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=state['processing_message_id'],
+                text=f"❌ خطا در ارسال فایل: {str(e)}"
+            )
+        else:
+            bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {str(e)}")
 
 # نمایش دکمه‌های شیشه‌ای جدید پس از ارسال فایل
 def show_new_file_options(chat_id):
@@ -199,7 +207,7 @@ def handle_new_file(call):
     user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
     bot.edit_message_text(
         chat_id=chat_id,
-        message_id=user_states[chat_id]['processing_message_id'],
+        message_id=call.message.message_id,
         text="👋 لطفاً فایل صوتی جدید خود را ارسال کنید."
     )
 
@@ -210,7 +218,7 @@ def handle_cancel(call):
     user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
     bot.edit_message_text(
         chat_id=chat_id,
-        message_id=user_states[chat_id]['processing_message_id'],
+        message_id=call.message.message_id,
         text="❌ عملیات لغو شد. لطفاً فایل صوتی جدیدی ارسال کنید."
     )
 
