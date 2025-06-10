@@ -1,226 +1,191 @@
-import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pydub import AudioSegment
+# bot.py
 import os
-import io
 import logging
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ConversationHandler,
+    CallbackContext,
+)
+from pydub import AudioSegment
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, APIC, TIT2, TPE1
 
-# تنظیمات اولیه
-TOKEN = "7197743010:AAF8kYM5tcFsfShRpyUmevS0BkrV2osPQ5I"  # توکن ربات شما
-bot = telebot.TeleBot(TOKEN)
+# فعال کردن لاگ برای دیدن خطاها
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-TEMP_FOLDER = "temp_audio"
-os.makedirs(TEMP_FOLDER, exist_ok=True)
+# مراحل مکالمه
+TITLE, ARTIST, PHOTO = range(3)
 
-user_states = {}
+# توکن ربات خود را اینجا قرار دهید
+TOKEN = "7197743010:AAF8kYM5tcFsfShRpyUmevS0BkrV2osPQ5I"  
 
-STATE_WAITING_AUDIO = "waiting_audio"
-STATE_WAITING_OPTIONS = "waiting_options"
+# تابع شروع کننده ربات
+async def start(update: Update, context: CallbackContext) -> None:
+    """دستور /start را مدیریت می‌کند"""
+    user = update.effective_user
+    await update.message.reply_html(
+        f"سلام {user.mention_html()}! 👋\n\n"
+        "من می‌توانم هر فایل صوتی یا ویدیویی را به MP3 تبدیل کنم و اطلاعات آن را ویرایش کنم.\n\n"
+        "کافیست فایل خود را برای من ارسال کنی.",
+    )
 
-# تنظیمات لاگ‌گیری
-logging.basicConfig(filename='bot.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# دستور شروع
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    user_states[message.chat.id] = {"state": STATE_WAITING_AUDIO}
-    bot.send_message(message.chat.id, "👋 سلام! لطفاً فایل صوتی خود را ارسال کنید.")
-
-# دریافت فایل صوتی
-@bot.message_handler(content_types=['audio', 'voice'])
-def process_audio(message):
+# تابع اصلی که فایل را دریافت می‌کند
+async def handle_file(update: Update, context: CallbackContext) -> int:
+    """فایل را دریافت، تبدیل به MP3 کرده و مکالمه را شروع می‌کند."""
+    message = await update.message.reply_text("در حال دریافت فایل... 📥")
+    
     try:
-        state = user_states.get(message.chat.id, {})
-        if state.get('state') != STATE_WAITING_AUDIO:
-            bot.send_message(message.chat.id, "❌ لطفاً ابتدا فایل صوتی را ارسال کنید!")
-            return
-
-        file_id = message.audio.file_id if message.audio else message.voice.file_id
-        file_info = bot.get_file(file_id)
-
-        # ارسال پیام اولیه و ذخیره message_id برای به‌روزرسانی
-        processing_message = bot.send_message(message.chat.id, "🔄 در حال پردازش فایل صوتی...")
-        user_states[message.chat.id]['processing_message_id'] = processing_message.message_id
+        # دریافت فایل (چه صوتی، چه ویدیویی، چه به صورت داکیومنت)
+        if update.message.effective_attachment:
+            file = await update.message.effective_attachment.get_file()
+        else:
+            await message.edit_text("خطا: فایلی ارسال نشده است.")
+            return ConversationHandler.END
 
         # دانلود فایل
-        downloaded_file = bot.download_file(file_info.file_path)
-        audio_data = io.BytesIO(downloaded_file)
+        file_path = f"downloads/{file.file_id}"
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        await file.download_to_drive(file_path)
+        await message.edit_text("فایل دریافت شد. در حال تبدیل به MP3... ⚙️")
 
-        # ذخیره داده در حافظه
-        user_states[message.chat.id]['audio_data'] = audio_data
-        user_states[message.chat.id]['state'] = STATE_WAITING_OPTIONS
+        # تبدیل به MP3 با استفاده از pydub
+        audio = AudioSegment.from_file(file_path)
+        mp3_path = f"output/{file.file_id}.mp3"
+        os.makedirs(os.path.dirname(mp3_path), exist_ok=True)
+        audio.export(mp3_path, format="mp3", bitrate="192k") # میتوانید بیت‌ریت را تغییر دهید
+        
+        # ذخیره مسیر فایل MP3 برای مراحل بعد
+        context.user_data['mp3_path'] = mp3_path
+        os.remove(file_path) # حذف فایل اصلی
 
-        # نمایش دکمه‌های شیشه‌ای
-        show_options(message.chat.id)
-
+        await message.edit_text("✅ تبدیل با موفقیت انجام شد.\n\n"
+                                "لطفاً **عنوان آهنگ** را وارد کنید:")
+        return TITLE
     except Exception as e:
-        logging.error(f"Error processing audio: {str(e)}")
-        bot.send_message(message.chat.id, f"❌ خطا در پردازش فایل صوتی: {str(e)}")
+        logger.error(f"Error in handle_file: {e}")
+        await message.edit_text(f"خطایی رخ داد: {e}\nلطفا مطمئن شوید FFmpeg به درستی نصب شده است.")
+        return ConversationHandler.END
 
-# نمایش دکمه‌های شیشه‌ای
-def show_options(chat_id):
-    keyboard = InlineKeyboardMarkup(row_width=2)
-    keyboard.add(
-        InlineKeyboardButton("📝 تغییر نام آلبوم", callback_data="change_title"),
-        InlineKeyboardButton("🎤 تغییر نام هنرمند", callback_data="change_artist"),
-        InlineKeyboardButton("📉 کم کردن حجم فایل", callback_data="reduce_size"),
-        InlineKeyboardButton("✅ ثبت تغییرات و ارسال فایل", callback_data="save_and_send"),
-        InlineKeyboardButton("❌ لغو", callback_data="cancel")
+
+# تابع دریافت عنوان آهنگ
+async def get_title(update: Update, context: CallbackContext) -> int:
+    """عنوان آهنگ را دریافت می‌کند."""
+    context.user_data['title'] = update.message.text
+    await update.message.reply_text("عالی! حالا **نام خواننده** را وارد کنید:")
+    return ARTIST
+
+# تابع دریافت نام خواننده
+async def get_artist(update: Update, context: CallbackContext) -> int:
+    """نام خواننده را دریافت می‌کند."""
+    context.user_data['artist'] = update.message.text
+    await update.message.reply_text(
+        "بسیار خب. در آخر، **عکس کاور** را ارسال کنید.\n\n"
+        "اگر نمی‌خواهید عکسی اضافه کنید، دستور /skip را بزنید."
     )
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=user_states[chat_id]['processing_message_id'],
-        text="🎛 لطفاً یکی از گزینه‌های زیر را انتخاب کنید:",
-        reply_markup=keyboard
-    )
+    return PHOTO
 
-# پردازش انتخاب کاربر
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback(call):
-    chat_id = call.message.chat.id
-    state = user_states.get(chat_id, {})
+# تابع دریافت عکس کاور
+async def get_photo(update: Update, context: CallbackContext) -> int:
+    """عکس کاور را دریافت و به فایل MP3 اضافه می‌کند."""
+    message = await update.message.reply_text("در حال اضافه کردن کاور... 🖼️")
+    photo_file = await update.message.photo[-1].get_file() # بهترین کیفیت عکس
+    photo_path = f"art/{photo_file.file_id}.jpg"
+    os.makedirs(os.path.dirname(photo_path), exist_ok=True)
+    await photo_file.download_to_drive(photo_path)
 
-    if call.data == "change_title":
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=state['processing_message_id'],
-            text="📝 لطفاً نام جدید آلبوم را وارد کنید:"
-        )
-        user_states[chat_id]['next_action'] = "set_title"
-    elif call.data == "change_artist":
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=state['processing_message_id'],
-            text="📝 لطفاً نام جدید هنرمند را وارد کنید:"
-        )
-        user_states[chat_id]['next_action'] = "set_artist"
-    elif call.data == "reduce_size":
-        reduce_audio_size(chat_id)
-    elif call.data == "save_and_send":
-        save_and_send_audio(chat_id)
-    elif call.data == "cancel":
-        handle_cancel(call)
+    # باز کردن فایل MP3 با mutagen
+    mp3_path = context.user_data['mp3_path']
+    audio = MP3(mp3_path, ID3=ID3)
 
-# دریافت عنوان جدید
-@bot.message_handler(func=lambda msg: user_states.get(msg.chat.id, {}).get('next_action') == "set_title")
-def set_title(message):
-    user_states[message.chat.id]['title'] = message.text
-    user_states[message.chat.id]['next_action'] = None
-    bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=user_states[message.chat.id]['processing_message_id'],
-        text=f"✅ عنوان آلبوم به {message.text} تغییر یافت."
-    )
-    show_options(message.chat.id)
-
-# دریافت نام هنرمند جدید
-@bot.message_handler(func=lambda msg: user_states.get(msg.chat.id, {}).get('next_action') == "set_artist")
-def set_artist(message):
-    user_states[message.chat.id]['artist'] = message.text
-    user_states[message.chat.id]['next_action'] = None
-    bot.edit_message_text(
-        chat_id=message.chat.id,
-        message_id=user_states[message.chat.id]['processing_message_id'],
-        text=f"✅ نام هنرمند به {message.text} تغییر یافت."
-    )
-    show_options(message.chat.id)
-
-# کم کردن حجم فایل
-def reduce_audio_size(chat_id):
-    state = user_states.get(chat_id, {})
-    try:
-        audio_data = state.get('audio_data')
-        audio = AudioSegment.from_file(audio_data)
-        reduced_audio = audio.set_frame_rate(22050).set_channels(1)  # کاهش کیفیت با حفظ کیفیت نسبی
-        user_states[chat_id]['audio_data'] = reduced_audio
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=state['processing_message_id'],
-            text="✅ حجم فایل با موفقیت کاهش یافت."
-        )
-        show_options(chat_id)
-    except Exception as e:
-        logging.error(f"Error reducing audio size: {str(e)}")
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=state['processing_message_id'],
-            text=f"❌ خطا در کاهش حجم فایل: {str(e)}"
-        )
-
-# ثبت تغییرات و ارسال فایل
-def save_and_send_audio(chat_id):
-    state = user_states.get(chat_id, {})
-    try:
-        audio = state.get('audio_data')
-        title = state.get('title', "Unknown Title")
-        artist = state.get('artist', "Unknown Artist")
-
-        processed_file = io.BytesIO()
-        audio.export(processed_file, format="mp3", tags={"title": title, "artist": artist})
-        processed_file.seek(0)
-
-        # ارسال فایل به کاربر
-        bot.send_audio(chat_id, processed_file, title=title, performer=artist)
-
-        # به‌روزرسانی پیام پردازش
-        if 'processing_message_id' in state:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=state['processing_message_id'],
-                text="✅ فایل با موفقیت ارسال شد."
+    # اضافه کردن تگ عکس
+    with open(photo_path, 'rb') as art:
+        audio.tags.add(
+            APIC(
+                encoding=3,       # 3 is for utf-8
+                mime='image/jpeg', # image type
+                type=3,           # 3 is for the cover image
+                desc='Cover',
+                data=art.read()
             )
-        else:
-            bot.send_message(chat_id, "✅ فایل با موفقیت ارسال شد.")
+        )
+    os.remove(photo_path) # حذف عکس دانلود شده
+    
+    await message.edit_text("کاور اضافه شد. در حال آماده‌سازی فایل نهایی...")
+    return await save_and_send(update, context, audio)
 
-        # پاک کردن داده‌های موقت
-        user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
-        show_new_file_options(chat_id)
+# تابع رد شدن از مرحله عکس
+async def skip_photo(update: Update, context: CallbackContext) -> int:
+    """از مرحله اضافه کردن عکس عبور می‌کند."""
+    mp3_path = context.user_data['mp3_path']
+    audio = MP3(mp3_path, ID3=ID3) # فقط فایل را برای افزودن تگ‌های دیگر باز می‌کند
+    await update.message.reply_text("کاور اضافه نشد. در حال آماده‌سازی فایل نهایی...")
+    return await save_and_send(update, context, audio)
 
-    except Exception as e:
-        logging.error(f"Error sending audio: {str(e)}")
-        if 'processing_message_id' in state:
-            bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=state['processing_message_id'],
-                text=f"❌ خطا در ارسال فایل: {str(e)}"
-            )
-        else:
-            bot.send_message(chat_id, f"❌ خطا در ارسال فایل: {str(e)}")
+# تابع ذخیره نهایی و ارسال فایل
+async def save_and_send(update: Update, context: CallbackContext, audio: MP3) -> int:
+    """اطلاعات متنی را ذخیره و فایل نهایی را ارسال می‌کند."""
+    # اضافه کردن تگ عنوان و خواننده
+    audio.tags.add(TIT2(encoding=3, text=context.user_data['title']))
+    audio.tags.add(TPE1(encoding=3, text=context.user_data['artist']))
+    audio.save() # ذخیره تغییرات
 
-# نمایش دکمه‌های شیشه‌ای جدید پس از ارسال فایل
-def show_new_file_options(chat_id):
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    keyboard.add(
-        InlineKeyboardButton("ارسال فایل جدید", callback_data="new_file")
+    # ارسال فایل صوتی نهایی
+    mp3_path = context.user_data['mp3_path']
+    with open(mp3_path, 'rb') as final_audio:
+        await update.message.reply_audio(
+            audio=final_audio,
+            title=context.user_data.get('title', 'Untitled'),
+            performer=context.user_data.get('artist', 'Unknown Artist'),
+            thumbnail=None # تلگرام خودش از کاور داخل فایل استفاده می‌کند
+        )
+    
+    # پاکسازی
+    os.remove(mp3_path)
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# تابع لغو عملیات
+async def cancel(update: Update, context: CallbackContext) -> int:
+    """کل مکالمه را لغو می‌کند."""
+    await update.message.reply_text("عملیات لغو شد. برای شروع مجدد، یک فایل جدید ارسال کنید.")
+    
+    # پاک کردن فایل‌های موقت اگر وجود دارند
+    if 'mp3_path' in context.user_data and os.path.exists(context.user_data['mp3_path']):
+        os.remove(context.user_data['mp3_path'])
+    context.user_data.clear()
+    
+    return ConversationHandler.END
+
+
+def main() -> None:
+    """ربات را اجرا می‌کند."""
+    application = Application.builder().token(TOKEN).build()
+
+    # تعریف ConversationHandler برای مدیریت مکالمه چند مرحله‌ای
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.AUDIO | filters.VIDEO | filters.Document.ALL & ~filters.COMMAND, handle_file)],
+        states={
+            TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title)],
+            ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_artist)],
+            PHOTO: [MessageHandler(filters.PHOTO, get_photo), CommandHandler("skip", skip_photo)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
     )
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=user_states[chat_id]['processing_message_id'],
-        text="🎉 فایل شما ارسال شد! آیا می‌خواهید فایل جدیدی ارسال کنید؟",
-        reply_markup=keyboard
-    )
 
-# پردازش انتخاب کاربر برای فایل جدید
-@bot.callback_query_handler(func=lambda call: call.data == "new_file")
-def handle_new_file(call):
-    chat_id = call.message.chat.id
-    user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text="👋 لطفاً فایل صوتی جدید خود را ارسال کنید."
-    )
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)
+    
+    print("ربات در حال اجرا است...")
+    application.run_polling()
 
-# پردازش لغو عملیات
-@bot.callback_query_handler(func=lambda call: call.data == "cancel")
-def handle_cancel(call):
-    chat_id = call.message.chat.id
-    user_states[chat_id] = {"state": STATE_WAITING_AUDIO}
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text="❌ عملیات لغو شد. لطفاً فایل صوتی جدیدی ارسال کنید."
-    )
 
-# اجرای ربات
-bot.infinity_polling()
+if __name__ == "__main__":
+    main()
+
